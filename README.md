@@ -1,9 +1,22 @@
-## This repository holds my personal ML project(s). I used Claude AI to help walk me through the steps of training several models. 
+# CineBot: Movie Chatbot
 
-### * movieReviewModel.ipynb *
-#### This notebook carries the framework for my sentiment analysis model. This uses the 25,000 IMDB movie review dataset on Hugging Face. It uses a DistilBERT pre-trained model which I then trained to identify sentiment on a binary basis. I also used a Qwen-2.5-3B language model to generate overviews on movies.
+A personal project I built while learning machine learning. I used Claude to
+help me work through the steps and write code.
 
+## What it does
+- `movieReviewModel.ipynb`: fine-tunes DistilBERT on the IMDB movie review
+  dataset ([25,000 training / 25,000 test] reviews) for binary sentiment
+  classification, and generates movie overviews with Qwen2.5-3B-Instruct.
+- `movieSentimentProj.py`: a chat version. After an overview, the user can chat
+  about the movie (up to 5 chats per session). The sentiment classifier reads
+  each message, and Qwen adapts its tone to the result.
 
-### * movieSentimentProj.py *
-#### This Python file contains a more sophisticated version of the language model from movieReviewModel.ipynb. In this file, the user is able to interact with the model about a movie of their choice up to 5 times per session. The Qwen-2.5-3B model uses the feedback from the sentiment analysis model to adapt to user input.
+## Limitations
+Overviews come from the model's own knowledge and are not fact-checked, so
+plot details can be wrong.
 
+## To run
+1. Run `movieReviewModel.ipynb` to train and save the model to `./my-model-fixed`.
+2. Run `python movieSentimentProj.py`.
+
+Requires: transformers, datasets, evaluate, accelerate, torch.
