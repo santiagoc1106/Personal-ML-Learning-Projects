@@ -150,7 +150,7 @@ def load_emotion_classifier():
     )
 
 
-def generate_movie_overview(movie_title, generator, emotion_classifier, prompt):
+def generate_movie_overview(movie_title, generator, emotion_classifier, prompt, history=None):
     """Generates a short plot overview for a movie and analyzes its emotional tone.
 
     Note: the overview is LLM-generated from the model's own knowledge, not pulled
@@ -158,7 +158,7 @@ def generate_movie_overview(movie_title, generator, emotion_classifier, prompt):
     events) may be inaccurate, especially for smaller/older movies. Treat the
     overview as illustrative text for the emotion analysis, not a factual summary.
     """
-    messages = [
+    messages = (history or []) + [
         {"role": "user", "content": f"{prompt} about the movie {movie_title}."}
     ]
 
@@ -168,32 +168,20 @@ def generate_movie_overview(movie_title, generator, emotion_classifier, prompt):
                                  f"Request: {prompt}"}
     ]
 
-    classResult = generator(classification, max_new_tokens = 50, do_sample = False)
+    classResult = generator(classification, max_new_tokens = 200, do_sample = False)
     classText = classResult[0]["generated_text"][-1]["content"]
 
-    print(f"DEBUG - raw classification response: '{classText}'")
 
     result = generator(messages, max_new_tokens=100, do_sample=True, temperature=0.7)
     overview_text = result[0]["generated_text"][-1]["content"]
 
-    emotion_keywords = ["emotion", "feel", "mood", "tone", "sentiment", "emotional"]
+    emotion_keywords = ["emotion overview", "tone overview", "sentiment overview", "emotional overview"]
     override = any(keyword in prompt.lower() for keyword in emotion_keywords)
 
     print(f"Movie: {movie_title}")
-    print(f"Overview: {overview_text}")
+    print(f"(CineBot) {overview_text}")
 
-    runEmotion = classText.strip().lower().startswith("yes") or override
-
-    if runEmotion:
-            emotions = emotion_classifier(overview_text)[0]  # sorted highest -> lowest
-            print(f"\nTop emotion: {emotions[0]['label']} ({emotions[0]['score']:.2%})")
-            print("\nFull emotion scale:")
-            for emotion in emotions:
-                print(f"  {emotion['label']}: {emotion['score']:.2%}")
-    else:
-            emotions = ""
-
-    return overview_text, emotions
+    return overview_text
 
 
 # ============================================================
@@ -208,19 +196,72 @@ if __name__ == "__main__":
         sentiment_model, sentiment_tokenizer = train_sentiment_model()
     else:
         sentiment_model, sentiment_tokenizer = load_sentiment_model("./my-model-fixed")
-
-    # Quick sanity check
-    label, probs = check_sentiment(
-        "This movie was absolutely fantastic!", sentiment_model, sentiment_tokenizer
-    )
-    print(f"Sentiment check -> label: {label}, probs: {probs}")
-
+    
     # --- Movie overview + emotion pipeline ---
     generator = load_generator()
     emotion_classifier = load_emotion_classifier()
 
-    movie_title = input("Enter a movie title: ")
-    userPrompt = input(f"What would you like to know about {movie_title}? ")
+    print("Movie Overview Chatbot")
+    print("=======================")
+
+    MAX_CHATS = 5 ## Hard limit on how many times the user can talk about the movie review
+    CHAT_REVISIONS = 0
 
 
-    generate_movie_overview(movie_title, generator, emotion_classifier, prompt=userPrompt)
+    movie_title = input("(CineBot) Enter a movie title: ")
+    userPrompt = input(f"(CineBot) What would you like to know about {movie_title}? ")
+
+    history = []
+
+    overview = generate_movie_overview(movie_title, generator, emotion_classifier, prompt=userPrompt, history=history)
+
+    history += [
+        {"role": "user", "content": f"{userPrompt} about the movie {movie_title}."},
+        {"role": "assistant", "content": overview},
+    ]
+
+    while len(history) < MAX_CHATS:
+        userChat = input(f"(User) ")
+
+        if not userChat:
+            break
+        else:
+            if (5 - len(history) == 2):
+                warning = " (Warning: only 2 more tokens left!)"
+            else:
+                warning = ""
+
+            label, probs = check_sentiment(userChat, sentiment_model, sentiment_tokenizer)
+            sentiment = "positive" if label == 1 else "negative"
+            confidence = probs[0][label].item()
+
+            DEBUG = False  # set True to see debug info about sentiment classification
+
+            if confidence >= 0.75:
+                tone = "positive" if label == 1 else "negative"
+                hint = (f"(Private note: your friend seems to feel {tone} about this. "
+                        f"Let that shape your tone, but never mention that you detected it.) ")
+                ending = "acknowledging how they feel"
+            else:
+                hint = ""
+                ending = "responding to what they said"
+
+            reply = generate_movie_overview(
+                movie_title, generator, emotion_classifier,
+                prompt=f"You are a movie expert chatting with a friend. They said: '{userChat}'. "
+                    f"{hint}Reply in 2-3 sentences, {ending}",
+                history=history,
+            ) + warning
+
+            history += [
+                {"role": "user", "content": userChat},
+                {"role": "assistant", "content": reply},
+            ]
+            CHAT_REVISIONS += 1
+
+
+    print("Thank you for using this chatbot!")
+        
+
+
+
