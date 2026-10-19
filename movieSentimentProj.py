@@ -1,13 +1,22 @@
 """
-Movie Overview + Emotion Analysis Pipeline
-===========================================
-1. Fine-tunes DistilBERT on IMDB for sentiment classification (with early-stopping
-   fix to avoid overfitting).
-2. Uses Qwen2.5-1.5B-Instruct to generate a short plot overview for any movie title.
-3. Runs that overview through an emotion classifier to get a full emotion breakdown.
+CineBot: Movie Overview Chatbot
+===============================
+1. Fine-tunes DistilBERT on IMDB for binary sentiment classification, keeping the
+   checkpoint with the lowest validation loss to avoid an overfit model.
+2. Uses Qwen2.5-3B-Instruct to generate a short plot overview for a movie title.
+3. After the overview, the user can chat with the model about the movie (up to 5
+   chats per session). The sentiment classifier reads each message and adapts the
+   chatbot's tone to the user's reaction.
+4. Runs an emotion classifier on generated text when the request calls for it.
 
-Run sections independently by commenting out what you don't need re-run each time
-(e.g. skip TRAINING if you already have a saved model in ./my-model-fixed).
+Note: overviews come from the model's own knowledge and are not fact-checked,
+so plot details may be wrong.
+
+I used Claude to walk me through the steps of this project and to help write the code.
+See movieReviewModel.ipynb for how the models were trained.
+
+Set TRAIN_FROM_SCRATCH = True in main to retrain, or leave it False to load the
+saved model from ./my-model-fixed.
 """
 
 import numpy as np
@@ -141,7 +150,7 @@ def load_generator():
     )
 
 
-def load_emotion_classifier():
+def load_emotion_classifier(): 
     """Loads the emotion classifier (returns scores across all emotion labels)."""
     return pipeline(
         "text-classification",
@@ -172,13 +181,9 @@ def generate_movie_overview(movie_title, generator, emotion_classifier, prompt, 
     classText = classResult[0]["generated_text"][-1]["content"]
 
 
-    result = generator(messages, max_new_tokens=100, do_sample=True, temperature=0.7)
+    result = generator(messages, max_new_tokens=200, do_sample=True, temperature=0.7)
     overview_text = result[0]["generated_text"][-1]["content"]
 
-    emotion_keywords = ["emotion overview", "tone overview", "sentiment overview", "emotional overview"]
-    override = any(keyword in prompt.lower() for keyword in emotion_keywords)
-
-    print(f"Movie: {movie_title}")
     print(f"(CineBot) {overview_text}")
 
     return overview_text
@@ -211,8 +216,16 @@ if __name__ == "__main__":
     movie_title = input("(CineBot) Enter a movie title: ")
     userPrompt = input(f"(CineBot) What would you like to know about {movie_title}? ")
 
-    history = []
 
+    SYSTEM = {"role": "system", "content": (
+        "You are CineBot, a friendly movie expert. Reply in 2-3 plain sentences "
+        "with no headers, bullet points, or markdown. If a title could mean several "
+        "movies, pick the most famous one and name it. If you're unsure about a "
+        "detail, say so instead of guessing. Never claim personal experiences or favorites."
+    )} # Sets a base for the model to understand its role and tone in the conversation
+
+    history = [SYSTEM]
+    turns = 0
     overview = generate_movie_overview(movie_title, generator, emotion_classifier, prompt=userPrompt, history=history)
 
     history += [
@@ -220,16 +233,14 @@ if __name__ == "__main__":
         {"role": "assistant", "content": overview},
     ]
 
-    while len(history) < MAX_CHATS:
+    while turns < MAX_CHATS:
         userChat = input(f"(User) ")
 
         if not userChat:
             break
         else:
-            if (5 - len(history) == 2):
-                warning = " (Warning: only 2 more tokens left!)"
-            else:
-                warning = ""
+            if (MAX_CHATS - turns == 2):
+                print("Warning: only 2 more tokens left!")
 
             label, probs = check_sentiment(userChat, sentiment_model, sentiment_tokenizer)
             sentiment = "positive" if label == 1 else "negative"
@@ -251,14 +262,13 @@ if __name__ == "__main__":
                 prompt=f"You are a movie expert chatting with a friend. They said: '{userChat}'. "
                     f"{hint}Reply in 2-3 sentences, {ending}",
                 history=history,
-            ) + warning
+            )
 
             history += [
                 {"role": "user", "content": userChat},
                 {"role": "assistant", "content": reply},
             ]
-            CHAT_REVISIONS += 1
-
+            turns += 1
 
     print("Thank you for using this chatbot!")
         
